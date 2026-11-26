@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Products — Puriva Group</title>
+  <meta name="description" content="Browse Puriva products and build a retail or wholesale order on WhatsApp.">
+  <meta name="theme-color" content="#5B0070">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    .pg-head{padding:3rem 0 1.6rem}
+    .pg-head h1{font-size:clamp(2.4rem,8vw,4.6rem);margin-top:.8rem}
+    .tools{display:grid;gap:1rem;margin:1.6rem 0 .8rem}
+    .tools input{width:100%;max-width:460px;background:rgba(255,255,255,.07);border:1px solid var(--line);
+      border-radius:999px;padding:.9rem 1.3rem;color:#fff;font:inherit}
+    .tools input::placeholder{color:var(--mute)}
+    .chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px}
+    .chip{flex:none;padding:.55rem 1.1rem;border-radius:999px;border:1px solid var(--line);font-size:.85rem;color:var(--mute)}
+    .chip[aria-pressed="true"]{background:#fff;color:var(--purple);font-weight:600;border-color:#fff}
+    #grid{padding:1rem 0 5rem}
+
+    .pd-overlay{position:fixed;inset:0;z-index:55;background:rgba(5,0,8,.85);display:none;overflow-y:auto}
+    .pd-overlay.open{display:block}
+    .pd{position:relative;width:min(980px,94%);margin:3vh auto;border-radius:18px;border:1px solid var(--line);
+      background:linear-gradient(160deg,#2a003a,#0d0014 70%);overflow:hidden;display:grid}
+    @media(min-width:800px){.pd{grid-template-columns:1.1fr 1fr}}
+    .pd-close{position:absolute;top:12px;right:12px;z-index:3;width:42px;height:42px;border-radius:50%;
+      background:rgba(0,0,0,.55);border:1px solid var(--line)}
+    .viewer{position:relative;aspect-ratio:1;display:grid;place-items:center;overflow:hidden;
+      background:radial-gradient(70% 60% at 50% 40%,rgba(255,255,255,.16),transparent);touch-action:pan-y;cursor:zoom-in}
+    .viewer img{max-width:88%;max-height:88%;object-fit:contain;transition:transform .25s;user-select:none;
+      -webkit-user-drag:none;filter:drop-shadow(0 30px 36px rgba(0,0,0,.55))}
+    .viewer.zoom{cursor:zoom-out;touch-action:none}
+    .viewer.zoom img{transform:scale(2)}
+    .viewer.spin{cursor:grab}
+    .viewer.spin.grabbing{cursor:grabbing}
+    .vctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:.8rem 1rem;border-top:1px solid var(--line)}
+    .vctl button{padding:.5rem 1rem;border:1px solid var(--line);border-radius:999px;font-size:.82rem}
+    .vctl button[disabled]{opacity:.5;cursor:not-allowed}
+    .vctl .note{margin-left:auto}
+    .pd-info{padding:2rem 1.6rem;display:grid;gap:.8rem;align-content:start}
+    .pd-info h2{font-size:clamp(1.7rem,4vw,2.4rem)}
+    .pd-info select{background:rgba(255,255,255,.07);border:1px solid var(--line);color:#fff;border-radius:10px;padding:.8rem}
+    .pd-info .btn{justify-content:center;margin-top:.6rem}
+    .pd-info p{color:var(--mute)}
+  </style>
+</head>
+<body data-page="products">
+
+  <div id="site-header"></div>
+
+  <main class="wrap">
+    <div class="pg-head">
+      <p class="eyebrow">Shop</p>
+      <h1>Products</h1>
+      <div class="tools">
+        <input type="search" id="q" placeholder="Search products" aria-label="Search products" autocomplete="off">
+        <div class="chips" id="chips" role="group" aria-label="Filter by category"></div>
+      </div>
+      <p class="note" id="count" aria-live="polite"></p>
+    </div>
+    <div class="feat" id="grid"></div>
+  </main>
+
+  <div id="site-footer"></div>
+
+  <!-- Product detail -->
+  <div class="pd-overlay" id="pd" aria-hidden="true">
+    <div class="pd" role="dialog" aria-modal="true" aria-labelledby="pd-title">
+      <button class="pd-close" id="pd-close" aria-label="Close product">✕</button>
+      <div id="pd-body" style="display:contents"></div>
+    </div>
+  </div>
+
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+  (function () {
+    "use strict";
+    var A = window.PurivaApp, D = window.PURIVA, esc = A.esc;
+    var MIN_ANGLES = 8; // minimum real angle photos needed to enable 360°
+    var state = { q: "", cat: "all" };
+    var $ = function (s) { return document.getElementById(s); };
+    var grid = $("grid"), chipsEl = $("chips"), count = $("count"), pd = $("pd"), body = $("pd-body"), lastF = null;
+
+    /* ---------- catalogue ---------- */
+    function renderChips() {
+      var items = [{ id: "all", name: "All" }].concat(D.categories);
+      chipsEl.innerHTML = items.map(function (c) {
+        return '<button class="chip" data-chip="' + esc(c.id) + '" aria-pressed="' + (state.cat === c.id) + '">' + esc(c.name) + "</button>";
+      }).join("");
+    }
+    function render() {
+      var q = state.q.toLowerCase();
+      var list = A.visible.filter(function (p) {
+        if (state.cat !== "all" && p.category !== state.cat) return false;
+        if (!q) return true;
+        return [p.name, p.short, p.description, A.catName(p.category)].join(" ").toLowerCase().indexOf(q) > -1;
+      });
+      if (list.length) grid.innerHTML = list.map(A.card).join("");
+      else grid.innerHTML = '<p class="empty">' + (state.cat !== "all" && !q
+        ? "Products in this category are coming soon."
+        : "No products match your search. Try another word or category.") + "</p>";
+      count.textContent = list.length + (list.length === 1 ? " product" : " products");
+    }
+
+    /* ---------- detail view ---------- */
+    function openProduct(id) {
+      var p = D.products.find(function (x) { return x.id === id && x.visible !== false; });
+      if (!p) return;
+      lastF = document.activeElement;
+      var frames = (p.angles || []).filter(Boolean), spin = frames.length >= MIN_ANGLES;
+      var first = spin ? frames[0] : p.image;
+      var vars = (p.variants && p.variants.length)
+        ? '<label class="field">Size / variant<select id="pd-var">' + p.variants.map(function (v) { return "<option>" + esc(v) + "</option>"; }).join("") + "</select></label>" : "";
+      var ctl = spin
+        ? '<button type="button" id="prev" aria-label="Rotate left">◀</button><button type="button" id="next" aria-label="Rotate right">▶</button><span class="note">Drag or use arrow keys to rotate</span>'
+        : '<button type="button" id="zoom" aria-pressed="false">Zoom</button><button type="button" disabled title="Needs at least ' + MIN_ANGLES + ' real angle photos">360°</button><span class="note">360° view unlocks when angle photos are added</span>';
+      body.innerHTML =
+        '<div><div class="viewer' + (spin ? " spin" : "") + '" id="viewer" tabindex="0" role="group" aria-label="' + esc(p.name) + ' product viewer">' +
+        '<img src="' + esc(first) + '" alt="' + esc(p.name) + '" draggable="false"></div><div class="vctl">' + ctl + "</div></div>" +
+        '<div class="pd-info"><span class="eyebrow">' + esc(A.catName(p.category)) + '</span><h2 id="pd-title">' + esc(p.name) + "</h2>" +
+        (p.short ? "<p>" + esc(p.short) + "</p>" : "") + (p.description ? "<p>" + esc(p.description) + "</p>" : "") +
+        (p.notes ? '<p class="note">' + esc(p.notes) + "</p>" : "") +
+        '<p><strong style="color:#fff">Price on request</strong></p>' + vars +
+        '<button class="btn btn-primary" id="pd-add">Add to cart</button></div>';
+      pd.classList.add("open"); pd.setAttribute("aria-hidden", "false"); document.body.style.overflow = "hidden";
+      $("pd-close").focus();
+      $("pd-add").addEventListener("click", function () { var s = $("pd-var"); A.add(p.id, s ? s.value : ""); });
+      initViewer(spin, spin ? frames : [p.image]);
+    }
+
+    function initViewer(spin, imgs) {
+      var v = $("viewer"), im = v.querySelector("img");
+      if (spin) {
+        imgs.forEach(function (u) { var i = new Image(); i.src = u; }); // preload frames
+        var idx = 0, sx = 0, si = 0, drag = false;
+        var show = function (n) { idx = (n + imgs.length) % imgs.length; im.src = imgs[idx]; };
+        v.addEventListener("pointerdown", function (e) { drag = true; sx = e.clientX; si = idx; v.setPointerCapture(e.pointerId); v.classList.add("grabbing"); });
+        v.addEventListener("pointermove", function (e) {
+          if (!drag) return;
+          show(si - Math.round((e.clientX - sx) / (v.clientWidth / imgs.length)));
+        });
+        ["pointerup", "pointercancel"].forEach(function (t) {
+          v.addEventListener(t, function () { drag = false; v.classList.remove("grabbing"); });
+        });
+        v.addEventListener("keydown", function (e) {
+          if (e.key === "ArrowLeft") { show(idx - 1); e.preventDefault(); }
+          if (e.key === "ArrowRight") { show(idx + 1); e.preventDefault(); }
+        });
+        $("prev").addEventListener("click", function () { show(idx - 1); });
+        $("next").addEventListener("click", function () { show(idx + 1); });
+      } else {
+        var z = false, zb = $("zoom");
+        var setZ = function (on) {
+          z = on; v.classList.toggle("zoom", on); zb.setAttribute("aria-pressed", on);
+          zb.textContent = on ? "Reset zoom" : "Zoom"; if (!on) im.style.transformOrigin = "";
+        };
+        zb.addEventListener("click", function () { setZ(!z); });
+        v.addEventListener("click", function () { setZ(!z); });
+        v.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setZ(!z); } });
+        v.addEventListener("pointermove", function (e) {
+          if (!z) return;
+          var r = v.getBoundingClientRect();
+          im.style.transformOrigin = ((e.clientX - r.left) / r.width * 100) + "% " + ((e.clientY - r.top) / r.height * 100) + "%";
+        });
+      }
+    }
+
+    function closeProduct() {
+      if (!pd.classList.contains("open")) return;
+      pd.classList.remove("open"); pd.setAttribute("aria-hidden", "true"); document.body.style.overflow = "";
+      if (location.hash && location.hash !== "#wholesale") history.replaceState(null, "", location.pathname + location.search);
+      if (lastF && lastF.focus) lastF.focus();
+    }
+
+    function route() {
+      var h = decodeURIComponent(location.hash.slice(1));
+      if (h && h !== "wholesale") openProduct(h);
+    }
+
+    /* ---------- events ---------- */
+    chipsEl.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-chip]"); if (!b) return;
+      state.cat = b.dataset.chip; renderChips(); render();
+    });
+    $("q").addEventListener("input", function (e) { state.q = e.target.value.trim(); render(); });
+    $("pd-close").addEventListener("click", closeProduct);
+    pd.addEventListener("click", function (e) { if (e.target === pd) closeProduct(); });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !$("drawer").classList.contains("open")) closeProduct();
+    });
+    window.addEventListener("hashchange", route);
+
+    var cp = new URLSearchParams(location.search).get("cat");
+    if (cp && D.categories.some(function (c) { return c.id === cp; })) state.cat = cp;
+    renderChips(); render(); route();
+  })();
+  </script>
+</body>
+</html>
